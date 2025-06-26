@@ -4,6 +4,12 @@ from pydantic import BaseModel
 from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.orm import declarative_base, sessionmaker
 import os
+from passlib.context import CryptContext
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def get_password_hash(password):
+    return pwd_context.hash(password)
 
 app = FastAPI()
 
@@ -28,13 +34,17 @@ class AuthRequest(BaseModel):
     username: str
     password: str
 
+# Check password
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
+
 @app.post("/auth")
 def authenticate(auth: AuthRequest):
     db = SessionLocal()
     user = db.query(User).filter(User.username == auth.username).first()
     db.close()
 
-    if user and user.password == auth.password:
+    if user and verify_password(auth.password, user.password):
         return {"message": "Authentification réussie"}
     else:
         raise HTTPException(status_code=401, detail="Identifiants invalides")
@@ -50,3 +60,17 @@ def init_db():
 
 # Décommente cette ligne une fois pour créer l'utilisateur, puis re-commente-la
 # init_db()
+
+# Registration
+@app.post("/register")
+def register(auth: AuthRequest):
+    db = SessionLocal()
+    if db.query(User).filter(User.username == auth.username).first():
+        db.close()
+        raise HTTPException(status_code=400, detail="Nom d'utilisateur déjà pris")
+    hashed_password = get_password_hash(auth.password)
+    user = User(username=auth.username, password=hashed_password)
+    db.add(user)
+    db.commit()
+    db.close()
+    return {"message": "Inscription réussie"}
